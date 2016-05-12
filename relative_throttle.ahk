@@ -1,4 +1,4 @@
-﻿; vJoy Template for ADHD
+; vJoy Template for ADHD
 ; An example script to show how to build a virtual joystick app with ADHD
 
 ; Uses Shaul's vJoy - http://http://vjoystick.sourceforge.net/site/ - install this first
@@ -30,7 +30,7 @@ ADHD.config_about({name: "MWO Relative Throttle", version: 0.3, author: "evilC",
 ; The default application to limit hotkeys to.
 
 ; GUI size
-ADHD.config_size(375,220)
+ADHD.config_size(375,280)
 
 ; We need no actions, so disable warning
 ADHD.config_ignore_noaction_warning()
@@ -55,7 +55,7 @@ Gui, Tab, 1
 
 axis_list_ahk := Array("X","Y","Z","R","U","V")
 
-Gui, Add, GroupBox, x5 yp+25 W365 R3 section, Input Configuration
+Gui, Add, GroupBox, x5 yp+25 W365 R5 section, Input Configuration
 Gui, Add, Text, x15 ys+20, Joystick ID
 ADHD.gui_add("DropDownList", "JoyID", "xp+80 yp-5 W50", "1|2|3|4|5|6|7|8", "1")
 JoyID_TT := "The ID (Order in Windows Game Controllers?) of your Joystick"
@@ -63,7 +63,6 @@ JoyID_TT := "The ID (Order in Windows Game Controllers?) of your Joystick"
 Gui, Add, Text, xp+80 ys+20, Axis
 ADHD.gui_add("DropDownList", "JoyAxis", "xp+40 yp-5 W50", "1|2|3|4|5|6", "1")
 JoyAxis_TT := "The Axis on that stick that you wish to use"
-
 ADHD.gui_add("CheckBox", "InvertAxis", "xp+80  yp+5", "Invert Axis", 0)
 InvertAxis_TT := "Inverts the input axis.`nNot intended to be used with ""Use Half Axis"""
 
@@ -75,7 +74,15 @@ Gui, Add, Text, xp+80 ys+50, Change Factor
 ADHD.gui_add("Edit", "ChangeFactor", "xp+80 yp-5 W50", "", 0.1)
 ChangeFactor_TT := "The rate at which to accelerate / decelerate"
 
-Gui, Add, GroupBox, x5 yp+35 R2 W365 section, Debugging
+Gui, Add, Text, x15 ys+80, Pause ID
+ADHD.gui_add("DropDownList", "PauseID", "xp+80 yp-5 W50", "1|2|3|4|5|6|7|8", "1")
+PauseID_TT := "The ID (Order in Windows Game Controllers?) of your pause Joystick"
+
+Gui, Add, Text, xp+80 ys+80, Axis
+ADHD.gui_add("DropDownList", "PauseAxis", "xp+40 yp-5 W50", "1|2|3|4|5|6", "1")
+PauseAxis_TT := "The Axis on that stick that you wish to pause with"
+
+Gui, Add, GroupBox, x5 yp+45 R3 W365 section, Debugging
 Gui, Add, Text, x15 ys+15, Input axis value
 Gui, Add, Edit, xp+120 yp-2 W50 R1 vAxisValueIn ReadOnly,
 AxisValueIn_TT := "Raw input value of the axis.`nIf you have Joystick ID and axis set correctly,`nmoving the axis should change the numbers here"
@@ -83,6 +90,14 @@ AxisValueIn_TT := "Raw input value of the axis.`nIf you have Joystick ID and axi
 Gui, Add, Text, xp+60 ys+15, Adjusted axis value
 Gui, Add, Edit, xp+100 yp-2 W50 R1 vAxisValueOut ReadOnly,
 AxisValueOut_TT := "Input value adjusted according to options`nShould be 0 at center, 100 at full deflection"
+
+Gui, Add, Text, x15 ys+45, Pause axis value
+Gui, Add, Edit, xp+120 yp-2 W50 R1 vPauseValueIn ReadOnly,
+PauseValueIn_TT := "Raw input value of the axis.`nIf you have Joystick ID and axis set correctly,`nmoving the axis should change the numbers here"
+
+Gui, Add, Text, xp+60 ys+45, Stored Throttle
+Gui, Add, Edit, xp+100 yp-2 W50 R1 vStoredThrottle ReadOnly,
+PauseValueIn_TT := "Stored throttle setting that will be reapplied once the pause axis is neutral"
 
 ; End GUI creation section
 ; ============================================================================================
@@ -123,6 +138,8 @@ ADHD.finish_startup()
 ; Loop runs endlessly...
 axis := 0
 old_axis := 0
+paused_axis := 0
+masc_on := 0
  
 Loop, {
 	; Get the value of the axis the user has selected as input
@@ -134,14 +151,40 @@ Loop, {
 	; Update the contents of the "Current" debugging text box
 	GuiControl,,AxisValueIn, % round(axis_in,1)
 	
+	pause_value := conform_pause()
+
+	; Update the contents of the "Pause" debugging text box
+	GuiControl,,PauseValueIn, % round(pause_value,1)
+
 	if (abs(axis_in) > DeadzoneAmount){
 		; Stick deflected, modify old axis value by new axis value
-		axis := old_axis + (axis_in * ChangeFactor)
+		if (abs(axis_in) > 35){
+			if (axis_in > 0){
+				axis := 50
+			} else {
+				axis := -50
+			}
+			if (!masc_on){
+				sendinput, {m down}
+				masc_on := 1
+			}
+		} else {
+			axis := old_axis + (axis_in * ChangeFactor)
+			if (masc_on){
+				sendinput, {m up}
+				masc_on := 0
+			}
+		}
 	} else {
 		; Stick at neutral - do nothing
 		axis := old_axis
 		axis_in := 0
+		if (masc_on){
+			sendinput, {m up}
+			masc_on := 0
+		}
 	}
+
 
 	; Make sure axis stays within valid range	 
 	if (axis > 50){
@@ -153,11 +196,33 @@ Loop, {
 	; Save axis state for next loop, so we can increment or decrement it.
 	old_axis := axis
 
+	if (pause_value > 30){
+		if (abs(paused_axis) > 0){
+			axis := 0
+			old_axis := axis
+		} else {
+			paused_axis := axis
+			axis := 0
+			old_axis := axis
+		}
+	} else if (pause_value < -25){
+		old_axis := 0
+		axis := 0
+		paused_axis := 0
+	} else if (abs(paused_axis) > 0){
+		axis := paused_axis
+		old_axis := axis
+		paused_axis := 0
+	}
+
+	; Update the contents of the "Stored Throttle" debugging text box
+	GuiControl,,StoredThrottle, % round(paused_axis,1)
+
 	; Revert axis back to 0 -> 100 scale
 	axis += 50
 
 	; Update the contents of the "Adjusted" text box
-	GuiControl,,AxisValueOut, % round(axis_in,1)
+	GuiControl,,AxisValueOut, % round(axis,1)
 	 	 
 	; Assemble the string which sets which virtual axis will be manipulated
 	vjaxis := axis_list_vjoy[2]
@@ -193,6 +258,22 @@ conform_axis(){
 		axis := 100 - axis
 	}
 	
+	return axis
+}
+
+conform_pause(){
+	global axis_list_ahk
+	global PauseID
+	global PauseAxis
+
+	; Assemble string to describe which axis the user selected (eg 2JoyX)
+	tmp := PauseID "Joy" axis_list_ahk[PauseAxis]
+
+	; Detect the state of the input axis
+	GetKeyState, axis, % tmp
+
+	axis := axis - 50
+
 	return axis
 }
 
